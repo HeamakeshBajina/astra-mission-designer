@@ -1,0 +1,4 @@
+-e .
+streamlit>=1.40
+matplotlib>=3.9
+pandas>=2.2
