@@ -4,14 +4,28 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from astra.mission.advanced_mission import analyze_advanced_mission
+from astra.mission.burn_sequence import (
+    MissionBurn,
+    create_burn_sequence,
+)
+from astra.mission.constraints import (
+    MissionConstraints,
+    evaluate_delta_v_feasibility,
+)
 from astra.mission.optimizer import optimize_transfer_strategy
 from astra.mission.planner import create_mission_plan
+from astra.mission.propellant_analysis import (
+    evaluate_propellant_feasibility,
+)
 from astra.physics.constants import EARTH_RADIUS, EARTH_MU
 from astra.physics.orbital import (
     circular_orbital_velocity,
     orbital_period,
 )
+from astra.physics.rocket import delta_v_from_mass_ratio
 from astra.physics.transfers import hohmann_transfer
+from astra.simulation.mission_executor import execute_burn_sequence
 from astra.simulation.mission_trajectory import (
     simulate_continuous_hohmann,
 )
@@ -27,19 +41,19 @@ st.set_page_config(
 )
 
 
-st.title("🚀 ASTRA Mission Designer")
+st.title("ASTRA Mission Designer")
 
 st.write(
     "Computational aerospace mission analysis, orbital simulation, "
-    "and mission optimization."
+    "mission optimization, and numerical validation."
 )
 
 st.divider()
 
 
-# =========================================================
+# ---------------------------------------------------------------------------
 # Mission parameters
-# =========================================================
+# ---------------------------------------------------------------------------
 
 st.sidebar.header("Mission Parameters")
 
@@ -63,7 +77,7 @@ final_altitude_km = st.sidebar.number_input(
 )
 
 spacecraft_mass = st.sidebar.number_input(
-    "Spacecraft mass (kg)",
+    "Spacecraft initial mass (kg)",
     min_value=0.1,
     value=1000.0,
     step=50.0,
@@ -83,11 +97,19 @@ available_propellant = st.sidebar.number_input(
     step=25.0,
 )
 
+inclination_change_deg = st.sidebar.number_input(
+    "Inclination change (deg)",
+    min_value=0.0,
+    max_value=180.0,
+    value=0.0,
+    step=1.0,
+)
+
 
 try:
-    # =====================================================
-    # Mission analysis
-    # =====================================================
+    # -----------------------------------------------------------------------
+    # Base mission plan
+    # -----------------------------------------------------------------------
 
     plan = create_mission_plan(
         mission_name=mission_name,
@@ -105,7 +127,7 @@ try:
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric(
-        "Required Δv",
+        "Required Delta-v",
         f"{profile.required_delta_v / 1_000:.3f} km/s",
     )
 
@@ -135,9 +157,9 @@ try:
             "MISSION INFEASIBLE — available propellant is insufficient."
         )
 
-    # =====================================================
+    # -----------------------------------------------------------------------
     # Mission summary
-    # =====================================================
+    # -----------------------------------------------------------------------
 
     st.subheader("Mission Summary")
 
@@ -148,14 +170,12 @@ try:
             f"**Initial orbit:** "
             f"{profile.initial_altitude / 1_000:.1f} km"
         )
-
         st.write(
             f"**Target orbit:** "
             f"{profile.final_altitude / 1_000:.1f} km"
         )
-
         st.write(
-            f"**Spacecraft mass:** "
+            f"**Spacecraft initial mass:** "
             f"{profile.spacecraft_mass:.1f} kg"
         )
 
@@ -164,12 +184,10 @@ try:
             f"**Specific impulse:** "
             f"{profile.specific_impulse:.1f} s"
         )
-
         st.write(
             f"**Available propellant:** "
             f"{profile.available_propellant:.1f} kg"
         )
-
         st.write(
             f"**Required propellant:** "
             f"{profile.required_propellant:.2f} kg"
@@ -177,43 +195,198 @@ try:
 
     st.divider()
 
-    # =====================================================
-    # Orbital radii
-    # =====================================================
+    # -----------------------------------------------------------------------
+    # Radii and analytical Hohmann transfer
+    # -----------------------------------------------------------------------
 
-    initial_radius = (
-        EARTH_RADIUS + profile.initial_altitude
-    )
-
-    final_radius = (
-        EARTH_RADIUS + profile.final_altitude
-    )
+    initial_radius = EARTH_RADIUS + profile.initial_altitude
+    final_radius = EARTH_RADIUS + profile.final_altitude
 
     transfer = hohmann_transfer(
         initial_radius,
         final_radius,
     )
 
-    # =====================================================
-    # Continuous mission simulation
-    # =====================================================
+    # -----------------------------------------------------------------------
+    # Advanced mission analysis
+    # -----------------------------------------------------------------------
+
+    st.subheader("Advanced Mission Analysis")
+
+    st.caption(
+        "Combines orbital-transfer delta-v with an analytical "
+        "instantaneous plane-change maneuver."
+    )
+
+    advanced_mission = analyze_advanced_mission(
+        initial_radius=initial_radius,
+        final_radius=final_radius,
+        inclination_change=inclination_change_deg,
+    )
+
+    advanced_col1, advanced_col2, advanced_col3, advanced_col4 = (
+        st.columns(4)
+    )
+
+    advanced_col1.metric(
+        "Hohmann Delta-v",
+        f"{advanced_mission.hohmann_delta_v / 1_000:.3f} km/s",
+    )
+
+    advanced_col2.metric(
+        "Plane Change Delta-v",
+        f"{advanced_mission.plane_change_delta_v / 1_000:.3f} km/s",
+    )
+
+    advanced_col3.metric(
+        "Combined Delta-v",
+        f"{advanced_mission.combined_delta_v / 1_000:.3f} km/s",
+    )
+
+    advanced_col4.metric(
+        "Transfer Time",
+        f"{advanced_mission.transfer_time / 3600:.2f} hr",
+    )
+
+    if inclination_change_deg == 0:
+        st.info(
+            "No inclination change selected. "
+            "The combined maneuver is equivalent to the Hohmann transfer."
+        )
+    else:
+        st.info(
+            f"Analytical plane change: "
+            f"{inclination_change_deg:.1f} degrees at the target orbit."
+        )
+
+    # -----------------------------------------------------------------------
+    # Propellant-constrained advanced analysis
+    # -----------------------------------------------------------------------
+
+    st.subheader("Propellant Feasibility")
+
+    if available_propellant < spacecraft_mass:
+        dry_mass = spacecraft_mass - available_propellant
+
+        advanced_propellant = evaluate_propellant_feasibility(
+            dry_mass=dry_mass,
+            propellant_available=available_propellant,
+            specific_impulse=specific_impulse,
+            required_delta_v=advanced_mission.combined_delta_v,
+        )
+
+        prop_col1, prop_col2, prop_col3, prop_col4 = st.columns(4)
+
+        prop_col1.metric(
+            "Initial Mass",
+            f"{advanced_propellant.initial_mass:.2f} kg",
+        )
+
+        prop_col2.metric(
+            "Propellant Required",
+            f"{advanced_propellant.propellant_required:.2f} kg",
+        )
+
+        prop_col3.metric(
+            "Propellant Remaining",
+            f"{max(advanced_propellant.propellant_remaining, 0):.2f} kg",
+        )
+
+        prop_col4.metric(
+            "Advanced Mission",
+            "FEASIBLE" if advanced_propellant.feasible else "INFEASIBLE",
+        )
+
+        if advanced_propellant.feasible:
+            st.success(
+                "ADVANCED MISSION FEASIBLE — the spacecraft has enough "
+                "propellant for the combined maneuver."
+            )
+        else:
+            st.error(
+                "ADVANCED MISSION INFEASIBLE — the combined maneuver "
+                "exceeds available propellant."
+            )
+
+    else:
+        st.warning(
+            "Advanced propellant analysis requires available propellant "
+            "to be less than initial spacecraft mass."
+        )
+
+    # -----------------------------------------------------------------------
+    # Delta-v constraint analysis
+    # -----------------------------------------------------------------------
+
+    st.subheader("Mission Constraints")
+
+    if available_propellant < spacecraft_mass:
+        final_mass = spacecraft_mass - available_propellant
+
+        available_delta_v = delta_v_from_mass_ratio(
+            initial_mass=spacecraft_mass,
+            final_mass=final_mass,
+            specific_impulse=specific_impulse,
+        )
+
+        constraints = MissionConstraints(
+            dry_mass=final_mass,
+            propellant_mass=available_propellant,
+            specific_impulse=specific_impulse,
+            maximum_delta_v=available_delta_v,
+        )
+
+        feasibility = evaluate_delta_v_feasibility(
+            required_delta_v=advanced_mission.combined_delta_v,
+            available_delta_v=constraints.maximum_delta_v,
+        )
+
+        constraint_col1, constraint_col2, constraint_col3 = st.columns(3)
+
+        constraint_col1.metric(
+            "Available Delta-v",
+            f"{feasibility.available_delta_v / 1_000:.3f} km/s",
+        )
+
+        constraint_col2.metric(
+            "Required Delta-v",
+            f"{feasibility.required_delta_v / 1_000:.3f} km/s",
+        )
+
+        constraint_col3.metric(
+            "Delta-v Margin",
+            f"{feasibility.delta_v_margin / 1_000:.3f} km/s",
+        )
+
+        if feasibility.feasible:
+            st.success(
+                "CONSTRAINT CHECK PASSED — available delta-v "
+                "covers the mission requirement."
+            )
+        else:
+            st.error(
+                "CONSTRAINT CHECK FAILED — mission delta-v exceeds "
+                "available spacecraft capability."
+            )
+
+    # -----------------------------------------------------------------------
+    # Continuous Hohmann simulation
+    # -----------------------------------------------------------------------
 
     st.subheader("Continuous Mission Simulation")
 
     st.caption(
-        "Numerically propagated spacecraft trajectory with "
-        "two instantaneous Hohmann burns."
+        "Numerically propagated spacecraft trajectory with two "
+        "instantaneous Hohmann burns."
     )
 
     mission_trajectory = simulate_continuous_hohmann(
         initial_radius=initial_radius,
         final_radius=final_radius,
-        dt=10,
+        dt=10.0,
     )
 
-    figure, axis = plt.subplots(
-        figsize=(9, 9),
-    )
+    figure, axis = plt.subplots(figsize=(9, 9))
 
     x_positions = [
         state.x / 1_000
@@ -266,83 +439,217 @@ try:
 
     plt.close(figure)
 
-    # =====================================================
+    # -----------------------------------------------------------------------
     # Transfer details
-    # =====================================================
+    # -----------------------------------------------------------------------
 
     st.subheader("Transfer Details")
 
     transfer_col1, transfer_col2, transfer_col3 = st.columns(3)
 
     transfer_col1.metric(
-        "First Burn Δv",
+        "First Burn Delta-v",
         f"{transfer.first_burn_delta_v / 1_000:.3f} km/s",
     )
 
     transfer_col2.metric(
-        "Second Burn Δv",
+        "Second Burn Delta-v",
         f"{transfer.second_burn_delta_v / 1_000:.3f} km/s",
     )
 
     transfer_col3.metric(
-        "Total Δv",
+        "Total Delta-v",
         f"{transfer.total_delta_v / 1_000:.3f} km/s",
     )
 
     st.divider()
 
-    # =====================================================
-    # Burn timeline
-    # =====================================================
+    # -----------------------------------------------------------------------
+    # Burn sequence
+    # -----------------------------------------------------------------------
 
-    st.subheader("Burn Timeline")
+    st.subheader("Mission Burn Sequence")
 
-    for burn in mission_trajectory.burns:
-        st.write(
-            f"**{burn.name}** — "
-            f"t = {burn.time / 3600:.3f} hr — "
-            f"Δv = {burn.delta_v / 1_000:.3f} km/s"
+    planned_burns = [
+        MissionBurn(
+            name=burn.name,
+            time=burn.time,
+            delta_v=burn.delta_v,
+            direction=burn.direction,
         )
+        for burn in mission_trajectory.burns
+    ]
+
+    burn_sequence = create_burn_sequence(
+        planned_burns,
+    )
+
+    burn_sequence_col1, burn_sequence_col2 = st.columns(2)
+
+    burn_sequence_col1.metric(
+        "Burn Count",
+        str(burn_sequence.burn_count),
+    )
+
+    burn_sequence_col2.metric(
+        "Sequence Delta-v",
+        f"{burn_sequence.total_delta_v / 1_000:.3f} km/s",
+    )
+
+    burn_rows = []
+
+    for burn in burn_sequence.burns:
+        burn_rows.append(
+            {
+                "Burn": burn.name,
+                "Time (hr)": round(burn.time / 3600, 3),
+                "Delta-v (km/s)": round(burn.delta_v / 1_000, 4),
+                "Direction": burn.direction,
+            }
+        )
+
+    burn_dataframe = pd.DataFrame(burn_rows)
+
+    st.dataframe(
+        burn_dataframe,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # -----------------------------------------------------------------------
+    # Numerical mission execution
+    # -----------------------------------------------------------------------
+
+    st.subheader("Numerical Mission Execution")
+
+    st.caption(
+        "The Hohmann burn sequence is independently executed using "
+        "the RK4 propagation engine."
+    )
+
+    executed_mission = execute_burn_sequence(
+        initial_state=State(
+            x=initial_radius,
+            y=0.0,
+            vx=0.0,
+            vy=circular_orbital_velocity(initial_radius),
+        ),
+        sequence=burn_sequence,
+        dt=10.0,
+    )
+
+    execution_col1, execution_col2, execution_col3 = st.columns(3)
+
+    execution_col1.metric(
+        "Executed States",
+        str(len(executed_mission.states)),
+    )
+
+    execution_col2.metric(
+        "Executed Burns",
+        str(len(executed_mission.burn_indices)),
+    )
+
+    final_executed_state = executed_mission.states[-1]
+
+    final_executed_radius = (
+        final_executed_state.x**2
+        + final_executed_state.y**2
+    ) ** 0.5
+
+    execution_col3.metric(
+        "Final Radius",
+        f"{final_executed_radius / 1_000:.2f} km",
+    )
+
+    execution_figure, execution_axis = plt.subplots(
+        figsize=(9, 9),
+    )
+
+    execution_x = [
+        state.x / 1_000
+        for state in executed_mission.states
+    ]
+
+    execution_y = [
+        state.y / 1_000
+        for state in executed_mission.states
+    ]
+
+    execution_axis.plot(
+        execution_x,
+        execution_y,
+        label="Executed trajectory",
+    )
+
+    execution_axis.add_patch(
+        plt.Circle(
+            (0, 0),
+            EARTH_RADIUS / 1_000,
+            fill=True,
+            alpha=0.35,
+            label="Earth",
+        )
+    )
+
+    for burn_index in executed_mission.burn_indices:
+        burn_state = executed_mission.states[burn_index]
+
+        execution_axis.scatter(
+            burn_state.x / 1_000,
+            burn_state.y / 1_000,
+            s=90,
+            marker="*",
+        )
+
+    execution_axis.set_xlabel("X Position (km)")
+    execution_axis.set_ylabel("Y Position (km)")
+    execution_axis.set_title("ASTRA Numerical Burn-Sequence Execution")
+    execution_axis.set_aspect("equal")
+    execution_axis.legend()
+
+    st.pyplot(
+        execution_figure,
+        clear_figure=True,
+    )
+
+    plt.close(execution_figure)
 
     st.divider()
 
-    # =====================================================
+    # -----------------------------------------------------------------------
     # Transfer strategy optimization
-    # =====================================================
+    # -----------------------------------------------------------------------
 
     st.subheader("Transfer Strategy Optimization")
 
     st.caption(
-        "Compares a baseline Hohmann transfer against "
-        "bi-elliptic transfer candidates."
+        "Compares a baseline Hohmann transfer against bi-elliptic "
+        "transfer candidates."
     )
 
     optimizer_col1, optimizer_col2 = st.columns(2)
 
     with optimizer_col1:
-        minimum_intermediate_altitude_km = (
-            st.number_input(
-                "Minimum intermediate apoapsis (km)",
-                min_value=1.0,
-                value=max(
-                    final_altitude_km + 700.0,
-                    1500.0,
-                ),
-                step=500.0,
-            )
+        minimum_intermediate_altitude_km = st.number_input(
+            "Minimum intermediate apoapsis (km)",
+            min_value=1.0,
+            value=max(
+                final_altitude_km + 700.0,
+                1500.0,
+            ),
+            step=500.0,
         )
 
     with optimizer_col2:
-        maximum_intermediate_altitude_km = (
-            st.number_input(
-                "Maximum intermediate apoapsis (km)",
-                min_value=1.0,
-                value=max(
-                    final_altitude_km + 4700.0,
-                    5500.0,
-                ),
-                step=500.0,
-            )
+        maximum_intermediate_altitude_km = st.number_input(
+            "Maximum intermediate apoapsis (km)",
+            min_value=1.0,
+            value=max(
+                final_altitude_km + 4700.0,
+                5500.0,
+            ),
+            step=500.0,
         )
 
     search_resolution_km = st.number_input(
@@ -383,13 +690,8 @@ try:
         except ValueError as error:
             st.session_state["optimization_error"] = str(error)
 
-    optimization = st.session_state.get(
-        "optimization"
-    )
-
-    optimization_error = st.session_state.get(
-        "optimization_error"
-    )
+    optimization = st.session_state.get("optimization")
+    optimization_error = st.session_state.get("optimization_error")
 
     if optimization_error:
         st.error(optimization_error)
@@ -398,8 +700,8 @@ try:
         best = optimization.best_candidate
 
         st.success(
-            "OPTIMIZATION COMPLETE — "
-            "lowest-Δv feasible strategy identified."
+            "OPTIMIZATION COMPLETE — lowest-delta-v feasible "
+            "strategy identified."
         )
 
         result_col1, result_col2, result_col3 = st.columns(3)
@@ -410,7 +712,7 @@ try:
         )
 
         result_col2.metric(
-            "Optimized Δv",
+            "Optimized Delta-v",
             f"{best.total_delta_v / 1_000:.3f} km/s",
         )
 
@@ -437,7 +739,7 @@ try:
 
         if best.strategy == "Hohmann":
             st.info(
-                "Hohmann remains the lowest-Δv strategy "
+                "Hohmann remains the lowest-delta-v strategy "
                 "for this mission."
             )
         else:
@@ -449,7 +751,7 @@ try:
         savings_col1, savings_col2, savings_col3 = st.columns(3)
 
         savings_col1.metric(
-            "Δv Savings vs Hohmann",
+            "Delta-v Savings vs Hohmann",
             f"{delta_v_savings:.1f} m/s",
         )
 
@@ -470,10 +772,6 @@ try:
             optimal_apoapsis_text,
         )
 
-        # -------------------------------------------------
-        # Candidate table
-        # -------------------------------------------------
-
         st.subheader("Strategy Comparison")
 
         candidate_rows = []
@@ -489,10 +787,8 @@ try:
             candidate_rows.append(
                 {
                     "Strategy": candidate.strategy,
-                    "Intermediate Apoapsis (km)": (
-                        intermediate_text
-                    ),
-                    "Δv (km/s)": round(
+                    "Intermediate Apoapsis (km)": intermediate_text,
+                    "Delta-v (km/s)": round(
                         candidate.total_delta_v / 1_000,
                         4,
                     ),
@@ -505,7 +801,7 @@ try:
             )
 
         candidate_dataframe = pd.DataFrame(
-            candidate_rows
+            candidate_rows,
         )
 
         st.dataframe(
@@ -513,10 +809,6 @@ try:
             use_container_width=True,
             hide_index=True,
         )
-
-        # -------------------------------------------------
-        # Optimization plot
-        # -------------------------------------------------
 
         bielliptic_candidates = [
             candidate
@@ -535,10 +827,8 @@ try:
                 for candidate in bielliptic_candidates
             ]
 
-            optimization_figure, optimization_axis = (
-                plt.subplots(
-                    figsize=(10, 6)
-                )
+            optimization_figure, optimization_axis = plt.subplots(
+                figsize=(10, 6),
             )
 
             optimization_axis.plot(
@@ -568,7 +858,7 @@ try:
             )
 
             optimization_axis.set_ylabel(
-                "Total Δv (km/s)"
+                "Total Delta-v (km/s)"
             )
 
             optimization_axis.set_title(
@@ -584,24 +874,22 @@ try:
                 clear_figure=True,
             )
 
-            plt.close(
-                optimization_figure
-            )
+            plt.close(optimization_figure)
 
     st.divider()
 
-    # =====================================================
+    # -----------------------------------------------------------------------
     # Initial orbit analysis
-    # =====================================================
+    # -----------------------------------------------------------------------
 
     st.subheader("Initial Orbit Analysis")
 
     initial_velocity = circular_orbital_velocity(
-        initial_radius
+        initial_radius,
     )
 
     initial_period = orbital_period(
-        initial_radius
+        initial_radius,
     )
 
     initial_state = State(
@@ -614,11 +902,11 @@ try:
     trajectory = propagate_trajectory(
         initial_state=initial_state,
         duration=initial_period,
-        dt=10,
+        dt=10.0,
     )
 
     analysis = analyze_trajectory(
-        trajectory
+        trajectory,
     )
 
     times = trajectory.times
@@ -638,10 +926,6 @@ try:
         for energy in analysis.specific_energies
     ]
 
-    # =====================================================
-    # Analytical circular-orbit baselines
-    # =====================================================
-
     expected_altitude_km = (
         profile.initial_altitude / 1_000
     )
@@ -655,10 +939,6 @@ try:
         / (2 * initial_radius)
         / 1_000_000
     )
-
-    # =====================================================
-    # Numerical deviations
-    # =====================================================
 
     altitude_deviation_m = [
         (altitude - expected_altitude_km) * 1_000
@@ -690,19 +970,11 @@ try:
         for value in energy_deviation_j_kg
     )
 
-    # =====================================================
-    # Numerical error plots
-    # =====================================================
-
     stability_figure, stability_axes = plt.subplots(
         3,
         1,
         figsize=(10, 10),
     )
-
-    # -----------------------------------------------------
-    # Altitude error
-    # -----------------------------------------------------
 
     stability_axes[0].plot(
         times,
@@ -715,21 +987,11 @@ try:
         linewidth=1,
     )
 
-    stability_axes[0].set_xlabel(
-        "Time (s)"
-    )
-
-    stability_axes[0].set_ylabel(
-        "Altitude Error (m)"
-    )
-
+    stability_axes[0].set_xlabel("Time (s)")
+    stability_axes[0].set_ylabel("Altitude Error (m)")
     stability_axes[0].set_title(
         "Altitude Deviation from Circular-Orbit Baseline"
     )
-
-    # -----------------------------------------------------
-    # Velocity error
-    # -----------------------------------------------------
 
     stability_axes[1].plot(
         times,
@@ -742,21 +1004,11 @@ try:
         linewidth=1,
     )
 
-    stability_axes[1].set_xlabel(
-        "Time (s)"
-    )
-
-    stability_axes[1].set_ylabel(
-        "Velocity Error (m/s)"
-    )
-
+    stability_axes[1].set_xlabel("Time (s)")
+    stability_axes[1].set_ylabel("Velocity Error (m/s)")
     stability_axes[1].set_title(
         "Velocity Deviation from Circular-Orbit Baseline"
     )
-
-    # -----------------------------------------------------
-    # Energy error
-    # -----------------------------------------------------
 
     stability_axes[2].plot(
         times,
@@ -769,14 +1021,8 @@ try:
         linewidth=1,
     )
 
-    stability_axes[2].set_xlabel(
-        "Time (s)"
-    )
-
-    stability_axes[2].set_ylabel(
-        "Energy Error (J/kg)"
-    )
-
+    stability_axes[2].set_xlabel("Time (s)")
+    stability_axes[2].set_ylabel("Energy Error (J/kg)")
     stability_axes[2].set_title(
         "Specific Orbital Energy Drift"
     )
@@ -788,19 +1034,17 @@ try:
         clear_figure=True,
     )
 
-    plt.close(
-        stability_figure
-    )
+    plt.close(stability_figure)
 
-    # =====================================================
+    # -----------------------------------------------------------------------
     # Numerical stability
-    # =====================================================
+    # -----------------------------------------------------------------------
 
     st.subheader("Numerical Stability")
 
     st.caption(
-        "These values quantify numerical integration error "
-        "during one simulated circular orbit."
+        "These values quantify numerical integration error during "
+        "one simulated circular orbit."
     )
 
     if (
@@ -808,20 +1052,16 @@ try:
         and max_speed_error_m_s < 0.01
     ):
         st.success(
-            "NUMERICAL VALIDATION PASSED — "
-            "the propagated circular orbit remains "
-            "within the selected engineering tolerance."
+            "NUMERICAL VALIDATION PASSED — the propagated circular "
+            "orbit remains within the selected engineering tolerance."
         )
     else:
         st.warning(
-            "NUMERICAL VALIDATION WARNING — "
-            "the propagation error is larger than "
-            "the expected tolerance."
+            "NUMERICAL VALIDATION WARNING — the propagation error "
+            "is larger than the expected tolerance."
         )
 
-    stability_col1, stability_col2, stability_col3 = (
-        st.columns(3)
-    )
+    stability_col1, stability_col2, stability_col3 = st.columns(3)
 
     stability_col1.metric(
         "Maximum Altitude Error",
@@ -855,9 +1095,9 @@ try:
 
     st.divider()
 
-    # =====================================================
+    # -----------------------------------------------------------------------
     # Initial orbit properties
-    # =====================================================
+    # -----------------------------------------------------------------------
 
     st.subheader("Initial Orbit Properties")
 
