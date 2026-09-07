@@ -512,7 +512,7 @@ try:
 
     st.dataframe(
         burn_dataframe,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -806,7 +806,7 @@ try:
 
         st.dataframe(
             candidate_dataframe,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
