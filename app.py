@@ -13,19 +13,32 @@ from astra.mission.constraints import (
     MissionConstraints,
     evaluate_delta_v_feasibility,
 )
+from astra.mission.mission_execution import (
+    MissionExecutionEvent,
+    create_mission_execution_plan,
+    execute_mission,
+)
+from astra.mission.mission_timeline import (
+    MissionEvent,
+    MissionEventType,
+    create_mission_timeline,
+)
 from astra.mission.optimizer import optimize_transfer_strategy
 from astra.mission.planner import create_mission_plan
 from astra.mission.propellant_analysis import (
     evaluate_propellant_feasibility,
 )
 from astra.physics.constants import EARTH_RADIUS, EARTH_MU
+from astra.physics.burn_vector import BurnVector
 from astra.physics.orbital import (
     circular_orbital_velocity,
     orbital_period,
 )
 from astra.physics.rocket import delta_v_from_mass_ratio
 from astra.physics.transfers import hohmann_transfer
+from astra.physics.thrust import ThrustModel
 from astra.simulation.mission_executor import execute_burn_sequence
+from astra.simulation.propagator_3d_thrust import State3DThrust
 from astra.simulation.mission_trajectory import (
     simulate_continuous_hohmann,
 )
@@ -520,100 +533,307 @@ try:
     # Numerical mission execution
     # -----------------------------------------------------------------------
 
-    st.subheader("Numerical Mission Execution")
+    st.subheader("Real Mission Execution Engine")
 
     st.caption(
-        "The Hohmann burn sequence is independently executed using "
-        "the RK4 propagation engine."
+        "Executes the planned Hohmann transfer using ASTRA's "
+        "3D finite-thrust RK4 mission engine."
     )
 
-    executed_mission = execute_burn_sequence(
-        initial_state=State(
-            x=initial_radius,
-            y=0.0,
-            vx=0.0,
-            vy=circular_orbital_velocity(initial_radius),
-        ),
-        sequence=burn_sequence,
-        dt=10.0,
+    execution_col1, execution_col2 = st.columns(2)
+
+    with execution_col1:
+        execution_thrust = st.number_input(
+            "Engine thrust (N)",
+            min_value=1.0,
+            value=1_000.0,
+            step=100.0,
+        )
+
+    with execution_col2:
+        include_j2 = st.checkbox(
+            "Include Earth J2 perturbation",
+            value=True,
+        )
+
+    mass_flow_rate = (
+        execution_thrust
+        / (specific_impulse * 9.80665)
     )
 
-    execution_col1, execution_col2, execution_col3 = st.columns(3)
+    first_delta_v = transfer.delta_v1
+    second_delta_v = transfer.delta_v2
 
-    execution_col1.metric(
-        "Executed States",
-        str(len(executed_mission.states)),
-    )
-
-    execution_col2.metric(
-        "Executed Burns",
-        str(len(executed_mission.burn_indices)),
-    )
-
-    final_executed_state = executed_mission.states[-1]
-
-    final_executed_radius = (
-        final_executed_state.x**2
-        + final_executed_state.y**2
-    ) ** 0.5
-
-    execution_col3.metric(
-        "Final Radius",
-        f"{final_executed_radius / 1_000:.2f} km",
-    )
-
-    execution_figure, execution_axis = plt.subplots(
-        figsize=(9, 9),
-    )
-
-    execution_x = [
-        state.x / 1_000
-        for state in executed_mission.states
-    ]
-
-    execution_y = [
-        state.y / 1_000
-        for state in executed_mission.states
-    ]
-
-    execution_axis.plot(
-        execution_x,
-        execution_y,
-        label="Executed trajectory",
-    )
-
-    execution_axis.add_patch(
-        plt.Circle(
-            (0, 0),
-            EARTH_RADIUS / 1_000,
-            fill=True,
-            alpha=0.35,
-            label="Earth",
+    first_final_mass = spacecraft_mass * (
+        2.718281828459045
+        ** (
+            -first_delta_v
+            / (specific_impulse * 9.80665)
         )
     )
 
-    for burn_index in executed_mission.burn_indices:
-        burn_state = executed_mission.states[burn_index]
-
-        execution_axis.scatter(
-            burn_state.x / 1_000,
-            burn_state.y / 1_000,
-            s=90,
-            marker="*",
+    final_execution_mass = first_final_mass * (
+        2.718281828459045
+        ** (
+            -second_delta_v
+            / (specific_impulse * 9.80665)
         )
-
-    execution_axis.set_xlabel("X Position (km)")
-    execution_axis.set_ylabel("Y Position (km)")
-    execution_axis.set_title("ASTRA Numerical Burn-Sequence Execution")
-    execution_axis.set_aspect("equal")
-    execution_axis.legend()
-
-    st.pyplot(
-        execution_figure,
-        clear_figure=True,
     )
 
-    plt.close(execution_figure)
+    required_execution_propellant = (
+        spacecraft_mass - final_execution_mass
+    )
+
+    dry_mass = spacecraft_mass - available_propellant
+
+    if dry_mass <= 0:
+        dry_mass = spacecraft_mass * 0.1
+
+    if required_execution_propellant > available_propellant:
+        st.error(
+            "MISSION EXECUTION BLOCKED ? the modeled Hohmann "
+            "transfer requires more propellant than available."
+        )
+    else:
+        first_burn_duration = (
+            (spacecraft_mass - first_final_mass)
+            / mass_flow_rate
+        )
+
+        second_burn_duration = (
+            (first_final_mass - final_execution_mass)
+            / mass_flow_rate
+        )
+
+        transfer_coast_duration = (
+            transfer.transfer_time
+            - first_burn_duration
+        )
+
+        if transfer_coast_duration <= 0:
+            st.error(
+                "MISSION EXECUTION BLOCKED ? finite-thrust "
+                "burn duration is incompatible with the "
+                "Hohmann transfer time."
+            )
+        else:
+            first_burn = MissionEvent(
+                name="Hohmann Perigee Burn",
+                start_time=0.0,
+                duration=first_burn_duration,
+                event_type=MissionEventType.BURN,
+            )
+
+            transfer_coast = MissionEvent(
+                name="Hohmann Transfer Coast",
+                start_time=first_burn.end_time,
+                duration=transfer_coast_duration,
+                event_type=MissionEventType.COAST,
+            )
+
+            second_burn = MissionEvent(
+                name="Hohmann Apogee Burn",
+                start_time=transfer.transfer_time,
+                duration=second_burn_duration,
+                event_type=MissionEventType.BURN,
+            )
+
+            timeline = create_mission_timeline(
+                [
+                    first_burn,
+                    transfer_coast,
+                    second_burn,
+                ]
+            )
+
+            execution_plan = create_mission_execution_plan(
+                [
+                    MissionExecutionEvent(
+                        event=first_burn,
+                        thrust_model=ThrustModel(
+                            thrust=execution_thrust,
+                            specific_impulse=specific_impulse,
+                        ),
+                        burn_direction=BurnVector(
+                            0.0,
+                            1.0,
+                            0.0,
+                        ),
+                        dry_mass=dry_mass,
+                    ),
+                    MissionExecutionEvent(
+                        event=transfer_coast,
+                    ),
+                    MissionExecutionEvent(
+                        event=second_burn,
+                        thrust_model=ThrustModel(
+                            thrust=execution_thrust,
+                            specific_impulse=specific_impulse,
+                        ),
+                        burn_direction=BurnVector(
+                            0.0,
+                            -1.0,
+                            0.0,
+                        ),
+                        dry_mass=dry_mass,
+                    ),
+                ]
+            )
+
+            initial_execution_state = State3DThrust(
+                x=initial_radius,
+                y=0.0,
+                z=0.0,
+                vx=0.0,
+                vy=circular_orbital_velocity(initial_radius),
+                vz=0.0,
+                mass=spacecraft_mass,
+            )
+
+            try:
+                executed_mission = execute_mission(
+                    initial_state=initial_execution_state,
+                    plan=execution_plan,
+                    timestep=10.0,
+                    include_j2=include_j2,
+                )
+
+                execution_col1, execution_col2, execution_col3, execution_col4 = (
+                    st.columns(4)
+                )
+
+                execution_col1.metric(
+                    "Mission Events",
+                    str(executed_mission.event_count),
+                )
+
+                execution_col2.metric(
+                    "Burns Executed",
+                    str(execution_plan.burn_count),
+                )
+
+                execution_col3.metric(
+                    "Propellant Used",
+                    f"{executed_mission.total_propellant_consumed:.2f} kg",
+                )
+
+                execution_col4.metric(
+                    "Final Mass",
+                    f"{executed_mission.final_mass:.2f} kg",
+                )
+
+                history = executed_mission.history
+
+                execution_x = [
+                    point.state.x / 1_000
+                    for point in history.points
+                ]
+
+                execution_y = [
+                    point.state.y / 1_000
+                    for point in history.points
+                ]
+
+                execution_figure, execution_axis = plt.subplots(
+                    figsize=(9, 9),
+                )
+
+                execution_axis.plot(
+                    execution_x,
+                    execution_y,
+                    label="Finite-thrust executed trajectory",
+                )
+
+                execution_axis.add_patch(
+                    plt.Circle(
+                        (0, 0),
+                        EARTH_RADIUS / 1_000,
+                        fill=True,
+                        alpha=0.35,
+                        label="Earth",
+                    )
+                )
+
+                for event in executed_mission.events:
+                    if event.event_type == MissionEventType.BURN:
+                        burn_points = [
+                            point
+                            for point in history.points
+                            if event.start_time
+                            <= point.time
+                            <= event.end_time
+                        ]
+
+                        if burn_points:
+                            burn_point = burn_points[0]
+
+                            execution_axis.scatter(
+                                burn_point.state.x / 1_000,
+                                burn_point.state.y / 1_000,
+                                s=90,
+                                marker="*",
+                                label=event.name,
+                            )
+
+                execution_axis.set_xlabel("X Position (km)")
+                execution_axis.set_ylabel("Y Position (km)")
+                execution_axis.set_title(
+                    "ASTRA Finite-Thrust Mission Execution"
+                )
+                execution_axis.set_aspect("equal")
+                execution_axis.legend()
+
+                st.pyplot(
+                    execution_figure,
+                    clear_figure=True,
+                )
+
+                plt.close(execution_figure)
+
+                st.subheader("Executed Mission Events")
+
+                event_dataframe = pd.DataFrame(
+                    [
+                        {
+                            "Event": event.name,
+                            "Type": event.event_type.value,
+                            "Start (s)": round(event.start_time, 2),
+                            "End (s)": round(event.end_time, 2),
+                            "Initial Mass (kg)": round(
+                                event.initial_mass,
+                                3,
+                            ),
+                            "Final Mass (kg)": round(
+                                event.final_mass,
+                                3,
+                            ),
+                            "Propellant Used (kg)": round(
+                                event.propellant_consumed,
+                                3,
+                            ),
+                        }
+                        for event in executed_mission.events
+                    ]
+                )
+
+                st.dataframe(
+                    event_dataframe,
+                    width="stretch",
+                    hide_index=True,
+                )
+
+                st.success(
+                    f"MISSION EXECUTION COMPLETE ? "
+                    f"{timeline.event_count} timeline events executed "
+                    f"through the "
+                    f"{'J2 + central-gravity' if include_j2 else 'central-gravity'} "
+                    f"3D dynamics model."
+                )
+
+            except ValueError as error:
+                st.error(
+                    f"MISSION EXECUTION FAILED ? {error}"
+                )
 
     st.divider()
 
