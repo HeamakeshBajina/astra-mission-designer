@@ -1541,3 +1541,112 @@ if report:
     st.download_button("Download comparison JSON", json.dumps(report, indent=2),
         file_name="astra_scenario_comparison.json", mime="application/json", key="sc_download")
     st.caption("Ideal two-body Earth Hohmann model only; excludes drag, injection errors, plane changes, finite burns, third-body effects, and operational reserves. Not flight-qualified.")
+
+# ASTRA_MISSION_ALTITUDE_SENSITIVITY
+st.divider()
+st.header("Mission Altitude Sensitivity & Trade-off Analysis")
+st.caption(
+    "Sweep target altitudes against shared delta-v and transfer-time limits "
+    "using ASTRA's ideal Earth Hohmann validation engine."
+)
+
+with st.expander("Configure altitude sensitivity sweep", expanded=False):
+    sens_a, sens_b = st.columns(2)
+    with sens_a:
+        sens_initial = st.number_input(
+            "Initial orbit altitude (km)", min_value=0.0, value=400.0,
+            key="alt_sens_initial",
+        )
+        sens_min = st.number_input(
+            "Minimum target altitude (km)", min_value=0.0, value=600.0,
+            key="alt_sens_min",
+        )
+        sens_max = st.number_input(
+            "Maximum target altitude (km)", min_value=0.001, value=1600.0,
+            key="alt_sens_max",
+        )
+    with sens_b:
+        sens_count = st.slider(
+            "Number of samples", min_value=2, max_value=500, value=21,
+            key="alt_sens_count",
+        )
+        sens_dv = st.number_input(
+            "Maximum delta-v (km/s)", min_value=0.001, value=5.0,
+            key="alt_sens_dv",
+        )
+        sens_time = st.number_input(
+            "Maximum transfer time (hours)", min_value=0.001, value=100.0,
+            key="alt_sens_time",
+        )
+
+    if st.button("Run altitude sensitivity sweep", key="alt_sens_run"):
+        try:
+            from astra.mission.altitude_sensitivity import (
+                analyze_altitude_sensitivity,
+            )
+
+            sens_report = analyze_altitude_sensitivity(
+                initial_altitude_km=sens_initial,
+                minimum_target_altitude_km=sens_min,
+                maximum_target_altitude_km=sens_max,
+                sample_count=sens_count,
+                max_delta_v_m_s=sens_dv * 1000.0,
+                max_transfer_time_s=sens_time * 3600.0,
+            )
+            st.session_state["astra_altitude_sensitivity_report"] = (
+                sens_report.to_dict()
+            )
+            st.session_state.pop("astra_altitude_sensitivity_error", None)
+        except (ValueError, TypeError, ArithmeticError) as exc:
+            st.session_state.pop("astra_altitude_sensitivity_report", None)
+            st.session_state["astra_altitude_sensitivity_error"] = str(exc)
+
+sens_error = st.session_state.get("astra_altitude_sensitivity_error")
+if sens_error:
+    st.error(f"Unable to run altitude sensitivity analysis: {sens_error}")
+
+sens_data = st.session_state.get("astra_altitude_sensitivity_report")
+if sens_data:
+    import pandas as pd
+
+    sens_rows = sens_data["points"]
+    sens_frame = pd.DataFrame([
+        {
+            "Target altitude (km)": p["target_altitude_km"],
+            "Delta-v (km/s)": p["total_delta_v_m_s"] / 1000.0,
+            "Transfer time (hours)": p["transfer_time_s"] / 3600.0,
+            "Delta-v passes": p["delta_v_passed"],
+            "Time passes": p["time_passed"],
+            "Feasible": p["feasible"],
+        }
+        for p in sens_rows
+    ])
+
+    st.metric(
+        "Sampled candidates meeting both limits",
+        f'{sens_data["feasible_count"]} / {sens_data["sample_count"]}',
+    )
+    st.subheader("Delta-v versus target altitude")
+    st.line_chart(
+        sens_frame.set_index("Target altitude (km)")["Delta-v (km/s)"]
+    )
+    st.subheader("Transfer time versus target altitude")
+    st.line_chart(
+        sens_frame.set_index("Target altitude (km)")["Transfer time (hours)"]
+    )
+    st.subheader("Delta-v / transfer-time trade-off")
+    st.scatter_chart(
+        sens_frame, x="Transfer time (hours)", y="Delta-v (km/s)"
+    )
+    st.dataframe(sens_frame, use_container_width=True, hide_index=True)
+    st.download_button(
+        "Download altitude sensitivity report (JSON)",
+        data=json.dumps(sens_data, indent=2),
+        file_name="astra_altitude_sensitivity.json",
+        mime="application/json",
+        key="alt_sens_download",
+    )
+    st.caption(
+        "The sweep samples the selected target-altitude range uniformly. "
+        "Results are ideal analytical estimates, not flight predictions."
+    )

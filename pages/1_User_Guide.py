@@ -291,3 +291,37 @@ Hohmann transfer. It excludes atmospheric drag, injection errors, plane changes,
 finite-duration burns, third-body perturbations, and operational reserves.
 A feasible result does not establish flight readiness.
 """)
+
+st.header("8. Mission Altitude Sensitivity & Trade-off Analysis")
+st.markdown("""
+This tool holds the initial orbit altitude fixed and evaluates a uniformly
+spaced range of target altitudes. Each sample is passed to ASTRA's shared
+mission validator.
+
+### Inputs and units
+- Initial altitude and target-altitude range are in kilometres above Earth's
+  surface.
+- Sample count is an integer from 2 to 500; both range endpoints are included.
+- Delta-v budget is entered in km/s; transfer-time limit is entered in hours.
+- The maximum target altitude must exceed the minimum.
+- A sampled target altitude cannot equal the initial altitude, because the
+  underlying transfer validator requires distinct initial and target altitudes.
+
+### Outputs
+- Delta-v versus target altitude and transfer time versus target altitude.
+- A trade-off scatter plot of transfer time against delta-v.
+- A table with individual constraint results and overall feasibility.
+- A feasible-candidate count and downloadable JSON report containing inputs,
+  sample results, and model limitations.
+
+This is a parameter sweep, not an optimizer. It evaluates only the specified
+sample locations; a target altitude between samples may produce different
+results. A candidate marked feasible passes both configured analytical limits.
+
+### Model assumptions and limitations
+The calculations use an ideal circular-to-circular Earth Hohmann transfer under
+two-body gravity. Atmospheric drag, launch injection errors, orbital plane
+changes, finite-duration burns, third-body perturbations, and operational
+reserves are excluded. Passing the two checks does not establish complete
+spacecraft feasibility or flight readiness.
+""")
