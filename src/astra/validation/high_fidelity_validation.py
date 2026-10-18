@@ -125,9 +125,9 @@ def compare_value(
             "Actual value must be finite."
         )
 
-    if tolerance < 0:
+    if not math.isfinite(tolerance) or tolerance < 0:
         raise ValueError(
-            "Tolerance cannot be negative."
+            "Tolerance must be finite and nonnegative."
         )
 
     absolute_error = abs(actual - expected)
@@ -294,9 +294,9 @@ def validate_trajectory(
 ) -> ScenarioValidationResult:
     """Validate a simulated position history."""
 
-    if position_tolerance < 0:
+    if not math.isfinite(position_tolerance) or position_tolerance < 0:
         raise ValueError(
-            "Position tolerance cannot be negative."
+            "Position tolerance must be finite and nonnegative."
         )
 
     if len(expected_positions) != len(actual_positions):
@@ -319,6 +319,13 @@ def validate_trajectory(
         if len(expected) != 3 or len(actual) != 3:
             raise ValueError(
                 "Trajectory positions must be 3D vectors."
+            )
+        if not all(
+            math.isfinite(component)
+            for component in (*expected, *actual)
+        ):
+            raise ValueError(
+                "Trajectory coordinates must all be finite."
             )
 
         expected_norm = math.sqrt(

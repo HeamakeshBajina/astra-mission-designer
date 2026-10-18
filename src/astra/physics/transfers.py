@@ -43,8 +43,13 @@ def hohmann_transfer(
     ValueError
         If either radius is not positive or the two radii are equal.
     """
-    if initial_radius <= 0 or final_radius <= 0:
-        raise ValueError("Orbit radii must be greater than zero.")
+    if (
+        not math.isfinite(initial_radius)
+        or not math.isfinite(final_radius)
+        or initial_radius <= 0
+        or final_radius <= 0
+    ):
+        raise ValueError("Orbit radii must be finite and greater than zero.")
 
     if math.isclose(initial_radius, final_radius):
         raise ValueError("Initial and final orbit radii must be different.")

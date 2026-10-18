@@ -18,24 +18,24 @@ def circular_orbital_velocity(radius: float) -> float:
     float
         Circular orbital velocity in metres per second.
     """
-    if radius <= 0:
-        raise ValueError("Radius must be greater than zero.")
+    if not math.isfinite(radius) or radius <= 0:
+        raise ValueError("Radius must be finite and greater than zero.")
 
     return math.sqrt(EARTH_MU / radius)
 
 
 def escape_velocity(radius: float) -> float:
     """Return escape velocity at a given radius in metres per second."""
-    if radius <= 0:
-        raise ValueError("Radius must be greater than zero.")
+    if not math.isfinite(radius) or radius <= 0:
+        raise ValueError("Radius must be finite and greater than zero.")
 
     return math.sqrt(2 * EARTH_MU / radius)
 
 
 def orbital_period(radius: float) -> float:
     """Return the period of a circular orbit in seconds."""
-    if radius <= 0:
-        raise ValueError("Radius must be greater than zero.")
+    if not math.isfinite(radius) or radius <= 0:
+        raise ValueError("Radius must be finite and greater than zero.")
 
     return 2 * math.pi * math.sqrt(radius**3 / EARTH_MU)
 
@@ -48,7 +48,7 @@ def specific_orbital_energy(radius: float) -> float:
     float
         Specific orbital energy in J/kg.
     """
-    if radius <= 0:
-        raise ValueError("Radius must be greater than zero.")
+    if not math.isfinite(radius) or radius <= 0:
+        raise ValueError("Radius must be finite and greater than zero.")
 
     return -EARTH_MU / (2 * radius)
