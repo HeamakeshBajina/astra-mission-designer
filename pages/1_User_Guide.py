@@ -200,3 +200,68 @@ st.caption(
     "ASTRA Mission Designer | User Guide | "
     "Educational aerospace mission analysis"
 )
+
+st.divider()
+
+st.header("6. Mission Constraint Analysis")
+
+st.markdown(
+    """
+    Mission Constraint Analysis independently checks an ideal
+    Earth Hohmann transfer against two limits you choose. It supplements
+    the main mission planner; it does not replace its propellant,
+    advanced-mission, or finite-thrust calculations.
+
+    ### Configure the limits
+
+    Open **Mission Constraint Analysis** below the main dashboard and
+    set the following limits:
+
+    - **Maximum transfer delta-v (km/s):** the maximum allowed sum of
+      the two ideal Hohmann burn magnitudes.
+    - **Maximum transfer time (hours):** the longest permitted
+      analytical transfer duration.
+
+    The starting and target altitudes come from the main Mission
+    Parameters sidebar. Select different altitudes to evaluate a transfer.
+
+    ### Read the results
+
+    - **Analytical delta-v:** the sum of the two ideal transfer burns.
+    - **Transfer duration:** half the period of the transfer ellipse.
+    - **Constraints passed:** the number of checks that passed.
+    - **Constraint results:** each check's status, calculated value,
+      allowed limit, and explanation.
+    - **Both constraints pass:** the selected analytical transfer meets
+      both configured limits. A failed check means that its limit is
+      exceeded.
+
+    The limits are inclusive: a calculated value equal to its limit
+    passes the check.
+
+    ### Export a report
+
+    Select **Download constraint report (JSON)** to export the mission
+    name, altitudes, configured limits, calculated results, individual
+    checks, and stated model limitations. JSON is useful for inspection,
+    reproducibility, and further analysis with other tools.
+
+    ### Model assumptions and limitations
+
+    This check models an ideal circular-to-circular Hohmann transfer
+    under a two-body Earth gravity assumption. It does not include
+    atmospheric drag, launch injection errors, orbital plane changes,
+    finite-duration burns, third-body perturbations, or operational
+    reserve policies.
+
+    A passing result means only that the two configured analytical
+    constraints are satisfied. It does not establish complete spacecraft
+    feasibility or flight readiness. Other ASTRA sections may produce
+    different results because they use different models and assumptions.
+    """
+)
+
+st.info(
+    "Tip: change one input at a time and compare the calculated delta-v "
+    "and transfer duration. Keep units consistent when comparing results."
+)
