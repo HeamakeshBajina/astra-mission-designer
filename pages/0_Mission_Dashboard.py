@@ -1336,3 +1336,149 @@ except ValueError as error:
 
 
     st.error(str(error))
+
+# ASTRA_MISSION_CONSTRAINT_ANALYSIS
+# ---------------------------------------------------------------------------
+# Explicit analytical mission constraints
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.header("Mission Constraint Analysis")
+st.caption(
+    "Independent ideal two-body Hohmann-transfer check. "
+    "Results complement, rather than replace, the mission planner above."
+)
+
+with st.expander("Configure mission limits", expanded=True):
+    constraint_col1, constraint_col2 = st.columns(2)
+
+    with constraint_col1:
+        max_delta_v_km_s = st.number_input(
+            "Maximum transfer delta-v (km/s)",
+            min_value=0.001,
+            value=1.0,
+            step=0.1,
+            format="%.3f",
+            key="constraint_max_delta_v",
+            help="Budget for the sum of the two ideal Hohmann burns.",
+        )
+
+    with constraint_col2:
+        max_transfer_time_hr = st.number_input(
+            "Maximum transfer time (hours)",
+            min_value=0.001,
+            value=3.0,
+            step=0.5,
+            format="%.3f",
+            key="constraint_max_time",
+        )
+
+try:
+    from astra.validation.mission_constraints import (
+        MissionRequirements,
+        validate_hohmann_mission,
+    )
+    import json
+
+    if initial_altitude_km == final_altitude_km:
+        st.warning(
+            "Choose different initial and target altitudes to evaluate "
+            "a Hohmann transfer."
+        )
+    else:
+        constraint_result = validate_hohmann_mission(
+            MissionRequirements(
+                initial_altitude_m=float(initial_altitude_km) * 1000.0,
+                target_altitude_m=float(final_altitude_km) * 1000.0,
+                max_delta_v_m_s=float(max_delta_v_km_s) * 1000.0,
+                max_transfer_time_s=float(max_transfer_time_hr) * 3600.0,
+            )
+        )
+
+        st.subheader("Constraint results")
+
+        if constraint_result.feasible:
+            st.success("Both configured constraints pass.")
+        else:
+            st.error("Mission does not satisfy every configured constraint.")
+
+        result_col1, result_col2, result_col3 = st.columns(3)
+
+        result_col1.metric(
+            "Analytical delta-v",
+            f"{constraint_result.total_delta_v_m_s / 1000.0:.4f} km/s",
+            help="Sum of the two ideal Hohmann burn magnitudes.",
+        )
+        result_col2.metric(
+            "Transfer duration",
+            f"{constraint_result.transfer_time_s / 3600.0:.3f} hr",
+        )
+        result_col3.metric(
+            "Constraints passed",
+            f"{sum(check.passed for check in constraint_result.checks)}"
+            f" / {len(constraint_result.checks)}",
+        )
+
+        constraint_rows = []
+        for check in constraint_result.checks:
+            if check.units == "m/s":
+                actual_display = f"{check.actual_value / 1000.0:.4f} km/s"
+                limit_display = f"{check.limit_value / 1000.0:.4f} km/s"
+            elif check.units == "s":
+                actual_display = f"{check.actual_value / 3600.0:.3f} hr"
+                limit_display = f"{check.limit_value / 3600.0:.3f} hr"
+            else:
+                actual_display = f"{check.actual_value:.4g} {check.units}"
+                limit_display = f"{check.limit_value:.4g} {check.units}"
+
+            constraint_rows.append(
+                {
+                    "Constraint": check.name.replace("_", " ").title(),
+                    "Status": "PASS" if check.passed else "FAIL",
+                    "Calculated": actual_display,
+                    "Allowed limit": limit_display,
+                    "Explanation": check.message,
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(constraint_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.caption(
+            "Model limitations: ideal circular-to-circular Earth transfer; "
+            "does not include plane changes, atmospheric drag, injection "
+            "errors, finite-duration burns, third-body perturbations, or "
+            "operational reserves. A passing result is not flight "
+            "qualification or a complete spacecraft feasibility assessment."
+        )
+
+        report_payload = {
+            "mission_name": mission_name,
+            "model": "ideal_two_body_earth_hohmann_transfer",
+            "initial_altitude_km": float(initial_altitude_km),
+            "target_altitude_km": float(final_altitude_km),
+            "max_delta_v_km_s": float(max_delta_v_km_s),
+            "max_transfer_time_hr": float(max_transfer_time_hr),
+            **constraint_result.to_dict(),
+            "limitations": [
+                "Ideal circular-to-circular Earth Hohmann transfer",
+                "No atmospheric drag or injection errors",
+                "No plane changes or finite-duration burns",
+                "No third-body perturbations or operational reserves",
+                "Not flight-qualified software",
+            ],
+        }
+
+        st.download_button(
+            "Download constraint report (JSON)",
+            data=json.dumps(report_payload, indent=2),
+            file_name="astra_mission_constraint_report.json",
+            mime="application/json",
+            key="download_constraint_report",
+        )
+
+except (ValueError, ArithmeticError) as exc:
+    st.error(f"Unable to evaluate mission constraints: {exc}")
