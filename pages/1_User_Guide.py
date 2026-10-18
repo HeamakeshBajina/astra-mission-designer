@@ -1,4 +1,4 @@
-﻿"""ASTRA Mission Designer user guide."""
+"""ASTRA Mission Designer user guide."""
 
 import streamlit as st
 
@@ -265,3 +265,29 @@ st.info(
     "Tip: change one input at a time and compare the calculated delta-v "
     "and transfer duration. Keep units consistent when comparing results."
 )
+
+
+st.header("7. Mission Scenario Comparison")
+st.markdown("""
+Compare multiple ideal circular-to-circular Earth Hohmann transfers against
+shared delta-v and transfer-time limits.
+
+### Inputs and units
+Choose the ranking objective, limits, and two to five scenarios. Altitudes are
+kilometres above Earth's surface, delta-v limits are km/s, and transfer-time
+limits are hours. Scenario names must be unique; initial and target altitudes
+must differ.
+
+### Ranking and export
+Feasible scenarios rank before infeasible scenarios. Within each group, the
+selected objective is used, with delta-v, transfer time, and name as tie-breakers.
+The table reports each constraint check and overall feasibility. Download the
+JSON report to retain inputs, outputs, ranking objective, constraints, and
+limitations.
+
+### Limitations
+This analytical model assumes ideal two-body circular Earth orbits and a
+Hohmann transfer. It excludes atmospheric drag, injection errors, plane changes,
+finite-duration burns, third-body perturbations, and operational reserves.
+A feasible result does not establish flight readiness.
+""")

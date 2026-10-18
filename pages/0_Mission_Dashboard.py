@@ -1482,3 +1482,62 @@ try:
 
 except (ValueError, ArithmeticError) as exc:
     st.error(f"Unable to evaluate mission constraints: {exc}")
+
+
+# ASTRA_MISSION_SCENARIO_COMPARISON
+st.divider()
+st.header("Mission Scenario Comparison")
+st.caption("Compare ideal circular-to-circular Earth Hohmann transfers under shared mission constraints.")
+with st.expander("Configure scenario comparison", expanded=False):
+    c1, c2 = st.columns(2)
+    with c1:
+        dv_kms = st.number_input("Maximum delta-v (km/s)", min_value=0.001, value=5.0, key="sc_dv")
+    with c2:
+        time_hours = st.number_input("Maximum transfer time (hours)", min_value=0.001, value=100.0, key="sc_time")
+    objective_label = st.selectbox("Ranking objective", ["Lowest total delta-v", "Shortest transfer time"], key="sc_objective")
+    count = st.slider("Number of scenarios", 2, 5, 3, key="sc_count")
+    defaults = [("Candidate A", 400., 800.), ("Candidate B", 400., 1200.), ("Candidate C", 300., 500.), ("Candidate D", 500., 1500.), ("Candidate E", 600., 2000.)]
+    inputs = []
+    for i in range(count):
+        a, b, c = st.columns(3)
+        n, x, y = defaults[i]
+        with a:
+            name = st.text_input("Scenario name", n, key=f"sc_name_{i}")
+        with b:
+            initial = st.number_input("Initial altitude (km)", min_value=0., value=x, key=f"sc_initial_{i}")
+        with c:
+            target = st.number_input("Target altitude (km)", min_value=0., value=y, key=f"sc_target_{i}")
+        inputs.append((name, initial, target))
+    if st.button("Compare scenarios", key="sc_run"):
+        try:
+            import json
+            from astra.mission.scenario_comparison import MissionScenario, compare_mission_scenarios
+            objective = "lowest_delta_v" if objective_label == "Lowest total delta-v" else "shortest_time"
+            result = compare_mission_scenarios(
+                [MissionScenario(*v) for v in inputs],
+                max_delta_v_m_s=dv_kms * 1000,
+                max_transfer_time_s=time_hours * 3600,
+                objective=objective)
+            st.session_state["astra_scenario_report"] = result.to_dict()
+        except (ValueError, TypeError, ArithmeticError) as exc:
+            st.error(f"Unable to compare scenarios: {exc}")
+
+import json
+report = st.session_state.get("astra_scenario_report")
+if report:
+    st.subheader("Ranked results")
+    rows = [{
+        "Rank": r["rank"], "Scenario": r["name"],
+        "Initial altitude (km)": r["initial_altitude_km"],
+        "Target altitude (km)": r["target_altitude_km"],
+        "Delta-v (km/s)": round(r["total_delta_v_m_s"] / 1000, 4),
+        "Transfer time (hours)": round(r["transfer_time_s"] / 3600, 3),
+        "Delta-v check": "PASS" if r["delta_v_passed"] else "FAIL",
+        "Time check": "PASS" if r["time_passed"] else "FAIL",
+        "Feasible": "YES" if r["feasible"] else "NO",
+    } for r in report["results"]]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.metric("Feasible scenarios", f'{report["feasible_count"]} / {report["scenario_count"]}')
+    st.download_button("Download comparison JSON", json.dumps(report, indent=2),
+        file_name="astra_scenario_comparison.json", mime="application/json", key="sc_download")
+    st.caption("Ideal two-body Earth Hohmann model only; excludes drag, injection errors, plane changes, finite burns, third-body effects, and operational reserves. Not flight-qualified.")
