@@ -561,8 +561,8 @@ try:
         / (specific_impulse * 9.80665)
     )
 
-    first_delta_v = transfer.delta_v1
-    second_delta_v = transfer.delta_v2
+    first_delta_v = transfer.first_burn_delta_v
+    second_delta_v = transfer.second_burn_delta_v
 
     first_final_mass = spacecraft_mass * (
         2.718281828459045
