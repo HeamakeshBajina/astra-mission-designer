@@ -88,10 +88,10 @@ st.header("3. Understand the main analysis sections")
 
 with st.expander("Advanced Mission Analysis"):
     st.write(
-        "Compares the Hohmann transfer delta-v with an analytical "
-        "inclination-change manoeuvre. A plane change can require "
-        "substantial additional delta-v, depending on orbital speed "
-        "and the requested angle."
+        "Models a Hohmann transfer with a plane change combined with "
+        "the circularization burn at the target orbit. The standalone "
+        "plane-change delta-v is a reference value; total mission delta-v "
+        "includes the first Hohmann burn and the combined arrival burn."
     )
 
 with st.expander("Propellant Feasibility and Mission Constraints"):

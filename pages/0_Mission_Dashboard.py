@@ -220,8 +220,8 @@ try:
     st.subheader("Advanced Mission Analysis")
 
     st.caption(
-        "Combines orbital-transfer delta-v with an analytical "
-        "instantaneous plane-change maneuver."
+        "Models a Hohmann transfer with circularization and an "
+        "inclination change combined in the arrival burn."
     )
 
     advanced_mission = analyze_advanced_mission(
@@ -240,12 +240,12 @@ try:
     )
 
     advanced_col2.metric(
-        "Plane Change Delta-v",
+        "Standalone Plane Change Delta-v",
         f"{advanced_mission.plane_change_delta_v / 1_000:.3f} km/s",
     )
 
     advanced_col3.metric(
-        "Combined Delta-v",
+        "Total Mission Delta-v",
         f"{advanced_mission.combined_delta_v / 1_000:.3f} km/s",
     )
 
@@ -261,7 +261,7 @@ try:
         )
     else:
         st.info(
-            f"Analytical plane change: "
+            f"Plane change combined with circularization at target orbit: "
             f"{inclination_change_deg:.1f} degrees at the target orbit."
         )
 
