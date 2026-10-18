@@ -156,11 +156,11 @@ try:
 
     if profile.feasible:
         st.success(
-            "MISSION FEASIBLE â€” available propellant is sufficient."
+            "MISSION FEASIBLE — available propellant is sufficient."
         )
     else:
         st.error(
-            "MISSION INFEASIBLE â€” available propellant is insufficient."
+            "MISSION INFEASIBLE — available propellant is insufficient."
         )
 
     # -----------------------------------------------------------------------
@@ -305,12 +305,12 @@ try:
 
         if advanced_propellant.feasible:
             st.success(
-                "ADVANCED MISSION FEASIBLE â€” the spacecraft has enough "
+                "ADVANCED MISSION FEASIBLE — the spacecraft has enough "
                 "propellant for the combined maneuver."
             )
         else:
             st.error(
-                "ADVANCED MISSION INFEASIBLE â€” the combined maneuver "
+                "ADVANCED MISSION INFEASIBLE — the combined maneuver "
                 "exceeds available propellant."
             )
 
@@ -366,12 +366,12 @@ try:
 
         if feasibility.feasible:
             st.success(
-                "CONSTRAINT CHECK PASSED â€” available delta-v "
+                "CONSTRAINT CHECK PASSED — available delta-v "
                 "covers the mission requirement."
             )
         else:
             st.error(
-                "CONSTRAINT CHECK FAILED â€” mission delta-v exceeds "
+                "CONSTRAINT CHECK FAILED — mission delta-v exceeds "
                 "available spacecraft capability."
             )
 
@@ -913,7 +913,7 @@ try:
         best = optimization.best_candidate
 
         st.success(
-            "OPTIMIZATION COMPLETE â€” lowest-delta-v feasible "
+            "OPTIMIZATION COMPLETE — lowest-delta-v feasible "
             "strategy identified."
         )
 
@@ -1265,12 +1265,12 @@ try:
         and max_speed_error_m_s < 0.01
     ):
         st.success(
-            "NUMERICAL VALIDATION PASSED â€” the propagated circular "
+            "NUMERICAL VALIDATION PASSED — the propagated circular "
             "orbit remains within the selected engineering tolerance."
         )
     else:
         st.warning(
-            "NUMERICAL VALIDATION WARNING â€” the propagation error "
+            "NUMERICAL VALIDATION WARNING — the propagation error "
             "is larger than the expected tolerance."
         )
 
